@@ -1,9 +1,12 @@
 [submodule "mcp"]
 	path = mcp
 	url = git@github.com:black-94/harness-acp-bridge-mcp.git
+	ignore = dirty
 [submodule "pi-extension"]
 	path = pi-extension
 	url = git@github.com:black-94/harness-acp-bridge-pi-extension.git
+	ignore = dirty
 [submodule "server"]
 	path = server
 	url = git@github.com:black-94/harness-acp-bridge-server.git
+	ignore = dirty
