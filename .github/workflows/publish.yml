@@ -1,11 +1,22 @@
 name: Publish to npm
 
-# 触发方式（推送 tag 即发布）：
-#   v0.1.4                  -> 依次发布 server -> mcp -> pi-extension
-#   server-v0.1.4           -> 只发布 server
-#   mcp-v0.1.4              -> 只发布 mcp
-#   pi-extension-v0.1.4     -> 只发布 pi-extension
+# 触发方式（推送 tag 即暂存）：
+#   v0.1.4                  -> 依次暂存 server -> mcp -> pi-extension
+#   server-v0.1.4           -> 只暂存 server
+#   mcp-v0.1.4              -> 只暂存 mcp
+#   pi-extension-v0.1.4     -> 只暂存 pi-extension
 # tag 中的版本号必须与对应 package.json 的 version 一致，否则流水线失败。
+#
+# 发布方式：NPM_TOKEN 是 stage-only token（Read and write (stage only)），CI 只能用
+# `npm stage publish` 把版本送进待审队列，不会直接上架。流水线跑完后由启用 2FA 的维护者批准：
+#   npm stage list
+#   npm stage view <stage-id>
+#   npm stage approve <stage-id> --otp <code>      # 也可以直接在 npmjs.com 网页上批准
+# 三个包要分别批准，且先批准 server 版本，再批准 mcp / pi-extension（它们依赖 npm 上的
+# @black942026/harness-acp-bridge-server）。
+#
+# 注意：暂存版本与已发布版本共用同一套版本号索引，同一个版本号只能 stage 一次。暂存成功后
+# 不要对同一 tag 重跑本流水线（会报版本已存在），要么去批准，要么先 `npm stage reject` 再重跑。
 on:
   push:
     tags:
@@ -42,6 +53,11 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org/
+
+      # `npm stage publish` 需要 npm CLI >= 11.15（stage 子命令），node 22 自带的 npm 10.x 没有；
+      # 固定主版本，避免 npm 升级到下一个大版本时流水线行为悄悄变化
+      - name: Upgrade npm
+        run: npm install -g npm@^12
 
       - name: Resolve version from tag
         id: ver
@@ -82,30 +98,30 @@ jobs:
           fi
           echo "All versions match tag $VERSION"
 
-      # server 必须先发布：mcp 和 pi-extension 依赖 npm 上的 @black942026/harness-acp-bridge-server
-      - name: Publish @black942026/harness-acp-bridge-server
+      # server 必须先暂存：mcp 和 pi-extension 依赖 npm 上的 @black942026/harness-acp-bridge-server
+      - name: Stage @black942026/harness-acp-bridge-server
         if: env.PUBLISH_ALL == 'true' || startsWith(github.ref_name, 'server-v')
         working-directory: server
         run: |
           npm ci
-          npm publish
+          npm stage publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Publish @black942026/harness-acp-bridge-mcp
+      - name: Stage @black942026/harness-acp-bridge-mcp
         if: env.PUBLISH_ALL == 'true' || startsWith(github.ref_name, 'mcp-v')
         working-directory: mcp
         run: |
           npm ci
-          npm publish
+          npm stage publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Publish @black942026/harness-acp-bridge-pi-extension
+      - name: Stage @black942026/harness-acp-bridge-pi-extension
         if: env.PUBLISH_ALL == 'true' || startsWith(github.ref_name, 'pi-extension-v')
         working-directory: pi-extension
         run: |
           npm ci
-          npm publish
+          npm stage publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
