@@ -1,0 +1,105 @@
+name: Publish to npm
+
+# 触发方式（推送 tag 即发布）：
+#   v0.1.4                  -> 依次发布 server -> mcp -> pi-extension
+#   server-v0.1.4           -> 只发布 server
+#   mcp-v0.1.4              -> 只发布 mcp
+#   pi-extension-v0.1.4     -> 只发布 pi-extension
+# tag 中的版本号必须与对应 package.json 的 version 一致，否则流水线失败。
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+      - 'server-v*.*.*'
+      - 'mcp-v*.*.*'
+      - 'pi-extension-v*.*.*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      # 是否为全局 tag（v 开头，发布全部三个包）
+      PUBLISH_ALL: ${{ startsWith(github.ref_name, 'v') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org/
+
+      - name: Resolve version from tag
+        id: ver
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [[ "$TAG" == v* ]]; then
+            VERSION="${TAG#v}"
+          else
+            VERSION="${TAG#*-v}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $VERSION"
+
+      - name: Verify versions match tag
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          check() {
+            local dir="$1"
+            local actual
+            actual="$(node -p "require('./$dir/package.json').version")"
+            if [[ "$actual" != "$VERSION" ]]; then
+              echo "::error::$dir/package.json version ($actual) does not match tag ($VERSION)"
+              exit 1
+            fi
+          }
+          if [[ "$PUBLISH_ALL" == "true" ]]; then
+            check server
+            check mcp
+            check pi-extension
+          else
+            case "$GITHUB_REF_NAME" in
+              server-v*)       check server ;;
+              mcp-v*)          check mcp ;;
+              pi-extension-v*) check pi-extension ;;
+            esac
+          fi
+          echo "All versions match tag $VERSION"
+
+      # server 必须先发布：mcp 和 pi-extension 依赖 npm 上的 @black942026/harness-acp-bridge-server
+      - name: Publish @black942026/harness-acp-bridge-server
+        if: env.PUBLISH_ALL == 'true' || startsWith(github.ref_name, 'server-v')
+        working-directory: server
+        run: |
+          npm ci
+          npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @black942026/harness-acp-bridge-mcp
+        if: env.PUBLISH_ALL == 'true' || startsWith(github.ref_name, 'mcp-v')
+        working-directory: mcp
+        run: |
+          npm ci
+          npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @black942026/harness-acp-bridge-pi-extension
+        if: env.PUBLISH_ALL == 'true' || startsWith(github.ref_name, 'pi-extension-v')
+        working-directory: pi-extension
+        run: |
+          npm ci
+          npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
