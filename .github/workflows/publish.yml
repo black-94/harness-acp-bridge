@@ -28,8 +28,14 @@ jobs:
       # 是否为全局 tag（v 开头，发布全部三个包）
       PUBLISH_ALL: ${{ startsWith(github.ref_name, 'v') }}
     steps:
+      # 子模块地址是 git@github.com:...，Actions 无 SSH key，需转为 HTTPS
+      - name: Use HTTPS for submodules
+        run: git config --global url."https://github.com/".insteadOf "git@github.com:"
+
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
