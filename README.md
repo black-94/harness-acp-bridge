@@ -5,9 +5,9 @@ message execution, and journals original traffic. Two independent clients drive 
 
 | Directory | Package | Role |
 | --- | --- | --- |
-| `server/` | `@black942026/harness-acp-bridge-server` | The HTTP server: eleven `POST /api/<name>` operations (transport / adapter / logic / HTTP layers). |
-| `mcp/` | `@black942026/harness-acp-bridge-mcp` | Stdio MCP proxy: eleven tools (bare names) plus `wait`. Thin HTTP client; `send_message` waits for the terminal result in the same tool call and uses MCP elicitation for reverse requests when the client supports it. |
-| `pi-extension/` | `@black942026/harness-acp-bridge-pi-extension` | Pi extension: eleven `acp_` tools plus `acp_wait`. Thin HTTP client with synchronous send/wait, Pi-native reverse-request dialogs, and UI-only progress preview. |
+| `server/` | `@black942026/harness-acp-bridge-server` | The HTTP server: fourteen `POST /api/<name>` operations (transport / adapter / logic / HTTP layers), including `register_template` / `search_template` / `delete_template` (templates are stored **information only**) and a template-free `create_session`. |
+| `mcp/` | `@black942026/harness-acp-bridge-mcp` | Stdio MCP proxy: thirteen tools (bare names) plus `wait`. Thin HTTP client; `send_message` waits for the terminal result in the same tool call and uses MCP elicitation for reverse requests when the client supports it. `search_template`/`create_template` expose the server's templates (`create_template` is a client alias for `register_template`). |
+| `pi-extension/` | `@black942026/harness-acp-bridge-pi-extension` | Pi extension: thirteen `acp_` tools plus `acp_wait`. Thin HTTP client with synchronous send/wait, Pi-native reverse-request dialogs, and UI-only progress preview. `acp_search_template`/`acp_create_template` expose the server's templates, and a portable `acp-create-template` skill guides collection. |
 
 Each client connects **directly** over HTTP (Pi does not go through MCP). Neither client starts
 a harness; both can start a **local** server on demand (loopback only) and reuse a running one.
@@ -27,11 +27,12 @@ HARNESS_ACP_BRIDGE_CONFIG=./config.example.yaml npm start
 
 `POST /api/<name>` with a JSON body; success is `{ ok: true, data }`, failure is
 `{ ok: false, error: { code, message, detail } }`. Operations: `ping`, `search_harness`,
-`create_session`, `close_session`, `authenticate`, `auth_status`, `set_session_options`,
+`register_template`, `delete_template`, `search_template`, `create_session`, `close_session`,
+`authenticate`, `auth_status`, `set_session_options`,
 `send_message`, `cancel_message`, `message_status`, `answer_question`. See
 [`server/README.md`](server/README.md) for the authoritative contract.
 
-The server advertises `protocol_version: 3`. Authenticate is a server-owned, interactive flow:
+The server advertises `protocol_version: 4`. Authenticate is a server-owned, interactive flow:
 `authenticate` returns a flow snapshot, the client asks each returned question and submits answers
 with a session-scoped `answer_question` (no `message_id`), and `auth_status` polls the same flow.
 A login-gated `create_session`/`send_message` returns a structured `authentication_required` error
@@ -39,10 +40,10 @@ whose `detail` carries `session_id` and `next_action`; the client never auto-aut
 
 ## Clients
 
-Both clients reuse a compatible server (`ping` + `protocol_version: 3`) at their configured
+Both clients reuse a compatible server (`ping` + `protocol_version: 4`) at their configured
 `baseUrl`, and start the server as a detached, reused background service only when nothing is
 listening on a loopback address. A non-loopback `baseUrl` is never spawned. A
-reachable-but-incompatible listener — including an older-protocol (e.g. `protocol_version: 2`)
+reachable-but-incompatible listener — including an older-protocol (e.g. `protocol_version: 3`)
 daemon — is reported and **rejected**, never replaced, restarted, or killed. Client
 `shutdown`/`reload` never closes server sessions or stops a reused instance. See each package
 README for lifecycle and configuration:
@@ -50,9 +51,37 @@ README for lifecycle and configuration:
 - [`mcp/README.md`](mcp/README.md) — MCP tools, elicitation, authentication, `send_message`/`wait`.
 - [`pi-extension/README.md`](pi-extension/README.md) — `acp_` tools, preview isolation, dialogs, auth.
 
-Both depend on `@black942026/harness-acp-bridge-server` (the HTTP server, protocol 3). There is no
+Both depend on `@black942026/harness-acp-bridge-server` (the HTTP server, protocol 4). There is no
 separate incremental-output endpoint: clients derive their UI-only preview from the optional bounded
 `status.progress` snapshot and use the terminal `result` as the final answer.
+
+## Launch templates
+
+Launch templates are administrator-owned **information**, persisted by the server so a caller can
+read a known-good recipe — they are never a `create_session` parameter. `create_session` takes the
+launch executable directly (`command`/`args`/`env`, plus Docker-only `login_dirs`) along with
+`cwd`/`model_id` and the other session fields; a `template`/`name`/`description` key is rejected.
+Both clients expose the same workflow:
+
+1. The user names or describes a template. `search_template` (MCP) / `acp_search_template` (Pi)
+   finds it by exact `name`, or `query`/`harness`; if several match, ask the user which one. The
+   full template content is returned so the model can expand it.
+2. Read the object, **drop** `name`/`description` and any field that does not apply (e.g. all
+   Docker fields for a direct session), then collect the values a template cannot supply —
+   `model_id` is always required (templates hold no model or thinking level), plus any missing
+   `cwd` — and the user's explicit overrides. When a template stores a field as `null` that is not
+   a valid session value (a local `remote_host`, a `null` `cwd`), **omit** it rather than passing
+   `null`.
+3. Create the session with those explicit fields: `create_session(cwd, model_id, …)`. When you
+   override `runtime`/`target`, re-check the combination (Docker fields require `runtime: docker`;
+   a remote target needs `remote_host`). The server validates — no client re-implements a default
+   merge, and the snapshot carries no template identity.
+
+Register a template with `create_template` (MCP) / `acp_create_template` (Pi) — a client alias for
+the server's `register_template` (there is no `POST /api/create_template`); duplicates are rejected,
+never overwritten, and registration starts no harness. The Pi package ships an
+[`acp-create-template` skill](pi-extension/skills/acp-create-template/SKILL.md) that guides the
+interview; it is a portable Agent Skills directory, so an MCP host can load the same `SKILL.md`.
 
 ## Migration
 
@@ -68,7 +97,15 @@ also makes a breaking contract change:
   longer takes an `authenticate` parameter. `answer_question`'s `message_id` is optional — omitted
   for session-authentication questions and reused for the shared `questions` shape
   (`request_id`/`kind`/`title`/`message`/`options`/`schema`).
-- The client compatibility protocol is now 3; older daemons are refused rather than reused.
+- `create_session` is decoupled from templates: it no longer accepts `template`/`name`/`description`,
+  never looks up or merges a template, and never records a selected-template identity. Templates are
+  stored **information only** (still `register_template`/`search_template`/`delete_template`).
+  `create_session` now accepts the launch executable directly (`command`/`args`/`env`) and
+  Docker-only `login_dirs`; `cwd` and `model_id` are always required. A caller chooses which
+  executable launches, but the ACP identity handshake still verifies it is the selected harness.
+- The client compatibility protocol is now 4 (was 3); older daemons — including a running
+  protocol-3 server, which must be restarted by its operator — are refused rather than reused,
+  restarted, or killed.
 
 Client configuration:
 - Pi settings no longer take `command`/`args`/`env`/`cwd`; use `baseUrl` (and optionally
@@ -81,7 +118,7 @@ Client configuration:
 Each package is an independent git repository. `cd` into one and run `npm ci && npm run check`.
 Client integration/lifecycle suites start a real server and its fake ACP harness (no paid model,
 Docker, or SSH); they resolve the in-repo build (`../server/dist`) first and fall back to the
-installed package, so they run only against a protocol-3 server and are skipped until the server is
+installed package, so they run only against a protocol-4 server and are skipped until the server is
 rebuilt with the new contract.
 
 ## License
