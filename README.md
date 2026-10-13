@@ -26,7 +26,7 @@ HARNESS_ACP_BRIDGE_CONFIG=./config.example.yaml npm start
 ```
 
 `POST /api/<name>` with a JSON body; success is `{ ok: true, data }`, failure is
-`{ ok: false, error: { code, message, detail } }`. Operations: `ping`, `search_harness`,
+`{ ok: false, error: { code, message, detail } }`. Operations: `ping`,
 `register_template`, `delete_template`, `search_template`, `create_session`, `close_session`,
 `authenticate`, `auth_status`, `set_session_options`,
 `send_message`, `cancel_message`, `message_status`, `answer_question`. See
@@ -66,22 +66,32 @@ Both clients expose the same workflow:
 1. The user names or describes a template. `search_template` (MCP) / `acp_search_template` (Pi)
    finds it by exact `name`, or `query`/`harness`; if several match, ask the user which one. The
    full template content is returned so the model can expand it.
-2. Read the object, **drop** `name`/`description` and any field that does not apply (e.g. all
-   Docker fields for a direct session), then collect the values a template cannot supply —
-   `model_id` is always required (templates hold no model or thinking level), plus any missing
-   `cwd` — and the user's explicit overrides. When a template stores a field as `null` that is not
-   a valid session value (a local `remote_host`, a `null` `cwd`), **omit** it rather than passing
-   `null`.
-3. Create the session with those explicit fields: `create_session(cwd, model_id, …)`. When you
-   override `runtime`/`target`, re-check the combination (Docker fields require `runtime: docker`;
-   a remote target needs `remote_host`). The server validates — no client re-implements a default
-   merge, and the snapshot carries no template identity.
+2. Read the object, map non-null `model` → `model_id` and `thinking` → `thinking_level`, and apply
+   user overrides. Ask only for a missing model or `cwd`; no static YAML candidate lists are needed.
+3. Follow `special_instructions` throughout. The calling LLM executes natural-language
+   `before_start` actions before startup and `after_start` actions after successful startup and any
+   required authentication, subject to user approval and safety rules. Registration executes nothing;
+   failed/unavailable actions must be reported, not silently skipped or claimed successful.
+4. Map Docker `network_mode` to session `host_network` (`host` → true; `none`/`proxy` → false),
+   pass the returned `env`, and **drop** `name`/`description`/`model`/`thinking`/`network_mode`/
+   `proxy_port`/`before_start`/`after_start`/`special_instructions`
+   and inapplicable fields, then call `create_session(cwd, model_id, …)` with only explicit allowed
+   fields. Omit invalid nulls (local `remote_host`, missing `cwd`) and re-check combinations after
+   runtime/target overrides. Neither server nor clients execute hooks or automatically merge a
+   template; the session snapshot carries no template identity.
 
 Register a template with `create_template` (MCP) / `acp_create_template` (Pi) — a client alias for
 the server's `register_template` (there is no `POST /api/create_template`); duplicates are rejected,
 never overwritten, and registration starts no harness. The Pi package ships an
 [`acp-create-template` skill](pi-extension/skills/acp-create-template/SKILL.md) that guides the
 interview; it is a portable Agent Skills directory, so an MCP host can load the same `SKILL.md`.
+
+Docker templates use `network_mode: none | host | proxy`. Proxy mode requires only `proxy_port`
+(1–65535); registration generates identical lowercase `http_proxy`/`https_proxy` using
+`http://host.docker.internal:PORT` and a `no_proxy` list for localhost/private ranges, replacing stale
+proxy aliases while preserving other env. It is not tied to Xray. Old template `host_network` is
+rejected; re-register templates using the new fields. See the server README for reachability and
+CIDR-client support requirements; registration does not test a live proxy.
 
 ## Migration
 
@@ -106,6 +116,16 @@ also makes a breaking contract change:
 - The client compatibility protocol is now 4 (was 3); older daemons — including a running
   protocol-3 server, which must be restarted by its operator — are refused rather than reused,
   restarted, or killed.
+
+`search_harness` and its Pi/MCP tools are removed; use launch templates to select a harness and
+model/thinking defaults.
+
+Configuration migration: remove the entire obsolete `harnesses` section from server YAML.
+All three built-in adapters are always available; select one from a template or explicit session
+`harness`. Omitted harness uses `default_harness` (Codex by default). With all service settings
+at defaults, no YAML file is needed. Use template `model`/`thinking` defaults or explicit session
+options; validation comes from the live harness. Existing templates load with null values for all
+five new fields.
 
 Client configuration:
 - Pi settings no longer take `command`/`args`/`env`/`cwd`; use `baseUrl` (and optionally
