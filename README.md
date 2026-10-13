@@ -137,6 +137,14 @@ Client configuration:
 ## Development
 
 Each package is an independent git repository. `cd` into one and run `npm ci && npm run check`.
+For the Pi extension, use `npm run dev:setup` before `npm run check` to apply its development-only
+security patch. When changing dependency ranges, regenerate and commit that package's lockfile
+with `npm install --package-lock-only --ignore-scripts`, then verify a clean `npm ci`. Updating only
+the manifest or the lockfile's root metadata leaves resolved dependencies stale and breaks CI.
+Client lockfiles must resolve an already-published server version: npm staging alone does not make
+a new server version available for installation. The release workflow checks the server and all
+selected clients before staging any package, so install/build/test failures cannot partially stage
+a release.
 Client integration/lifecycle suites start a real server and its fake ACP harness (no paid model,
 Docker, or SSH); they resolve the in-repo build (`../server/dist`) first and fall back to the
 installed package, so they run only against a protocol-4 server and are skipped until the server is

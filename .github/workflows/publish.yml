@@ -98,30 +98,47 @@ jobs:
           fi
           echo "All versions match tag $VERSION"
 
+      # 所有选中包先完成干净安装和检查，避免 server 已暂存后才发现客户端锁文件失配。
+      # 即使只发布客户端也构建 server，让集成测试使用本次检出的 server，而不是跳过。
+      - name: Validate server
+        working-directory: server
+        run: |
+          npm ci
+          npm run check
+
+      - name: Validate mcp
+        if: env.PUBLISH_ALL == 'true' || startsWith(github.ref_name, 'mcp-v')
+        working-directory: mcp
+        run: |
+          npm ci
+          npm run check
+
+      - name: Validate pi-extension
+        if: env.PUBLISH_ALL == 'true' || startsWith(github.ref_name, 'pi-extension-v')
+        working-directory: pi-extension
+        run: |
+          npm ci
+          npm run fix:dev-deps
+          npm run check
+
       # server 必须先暂存：mcp 和 pi-extension 依赖 npm 上的 @black942026/harness-acp-bridge-server
       - name: Stage @black942026/harness-acp-bridge-server
         if: env.PUBLISH_ALL == 'true' || startsWith(github.ref_name, 'server-v')
         working-directory: server
-        run: |
-          npm ci
-          npm stage publish
+        run: npm stage publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Stage @black942026/harness-acp-bridge-mcp
         if: env.PUBLISH_ALL == 'true' || startsWith(github.ref_name, 'mcp-v')
         working-directory: mcp
-        run: |
-          npm ci
-          npm stage publish
+        run: npm stage publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Stage @black942026/harness-acp-bridge-pi-extension
         if: env.PUBLISH_ALL == 'true' || startsWith(github.ref_name, 'pi-extension-v')
         working-directory: pi-extension
-        run: |
-          npm ci
-          npm stage publish
+        run: npm stage publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
