@@ -106,20 +106,24 @@ jobs:
           npm ci
           npm run check
 
+      # MCP 生命周期/配置一致性测试会导入 Pi 源码；客户端互测前必须安装双方依赖。
+      # 单独发布任一客户端也准备双方，但只检查/暂存选中的包。
+      - name: Install client test dependencies
+        if: env.PUBLISH_ALL == 'true' || startsWith(github.ref_name, 'mcp-v') || startsWith(github.ref_name, 'pi-extension-v')
+        run: |
+          npm ci --prefix mcp
+          npm ci --prefix pi-extension
+          npm run fix:dev-deps --prefix pi-extension
+
       - name: Validate mcp
         if: env.PUBLISH_ALL == 'true' || startsWith(github.ref_name, 'mcp-v')
         working-directory: mcp
-        run: |
-          npm ci
-          npm run check
+        run: npm run check
 
       - name: Validate pi-extension
         if: env.PUBLISH_ALL == 'true' || startsWith(github.ref_name, 'pi-extension-v')
         working-directory: pi-extension
-        run: |
-          npm ci
-          npm run fix:dev-deps
-          npm run check
+        run: npm run check
 
       # server 必须先暂存：mcp 和 pi-extension 依赖 npm 上的 @black942026/harness-acp-bridge-server
       - name: Stage @black942026/harness-acp-bridge-server

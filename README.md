@@ -144,7 +144,8 @@ the manifest or the lockfile's root metadata leaves resolved dependencies stale 
 Client lockfiles must resolve an already-published server version: npm staging alone does not make
 a new server version available for installation. The release workflow checks the server and all
 selected clients before staging any package, so install/build/test failures cannot partially stage
-a release.
+a release. Client releases install both clients' dependencies before checks: MCP's shared-server
+lifecycle tests import the sibling Pi extension, and configuration parity tests load both clients.
 Client integration/lifecycle suites start a real server and its fake ACP harness (no paid model,
 Docker, or SSH); they resolve the in-repo build (`../server/dist`) first and fall back to the
 installed package, so they run only against a protocol-4 server and are skipped until the server is
