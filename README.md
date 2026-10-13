@@ -112,7 +112,8 @@ also makes a breaking contract change:
   stored **information only** (still `register_template`/`search_template`/`delete_template`).
   `create_session` now accepts the launch executable directly (`command`/`args`/`env`) and
   Docker-only `login_dirs`; `cwd` and `model_id` are always required. A caller chooses which
-  executable launches, but the ACP identity handshake still verifies it is the selected harness.
+  executable launches; the ACP handshake validates the harness name when `agentInfo` is supplied.
+  ACP v1 permits omitted/null `agentInfo`, which does not block creation.
 - The client compatibility protocol is now 4 (was 3); older daemons — including a running
   protocol-3 server, which must be restarted by its operator — are refused rather than reused,
   restarted, or killed.
